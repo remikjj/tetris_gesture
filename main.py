@@ -7,11 +7,14 @@
 from collections import OrderedDict
 import random
 
+
 from pygame import Rect
 import pygame
 import numpy as np
 
-from gesture import get_fingers_status
+from gesture import start_camera_thread, get_latest_direction, get_and_reset_rotation_triggered, release_camera, get_and_reset_drop_triggered, reset_direction
+
+
 
 WINDOW_WIDTH, WINDOW_HEIGHT = 500, 601
 GRID_WIDTH, GRID_HEIGHT = 300, 600
@@ -233,6 +236,14 @@ class BlocksGroup(pygame.sprite.OrderedUpdates):
     def get_random_block():
         return random.choice(
             (SquareBlock, TBlock, LineBlock, LBlock, ZBlock))()
+    def drop_current_block(self):
+        """Move the block down until it reaches the bottom."""
+        while self.current_block.current:
+            try:
+                self.current_block.move_down(self)
+            except BottomReached:
+                break
+        self.update_grid()
 
     def __init__(self, *args, **kwargs):
         super().__init__(self, *args, **kwargs)
@@ -396,6 +407,7 @@ def draw_centered_surface(screen, surface, y):
 
 
 def main():
+    start_camera_thread()
     pygame.init()
     pygame.display.set_caption("Tetris with PyGame")
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
@@ -467,41 +479,23 @@ def main():
                 game_over = True
                 
             if not paused and not game_over:
-                gesture = get_fingers_status()
-
-            fingers_status = get_fingers_status()
-            if fingers_status is not None:
-                thumb_extended, thumb_horizontal = fingers_status[0]
-                index_extended = fingers_status[1]
-                pinky_extended = fingers_status[4]
-
-                # Ruch na lewo - wykrycie zmiany: jeśli wcześniej index nie był wyprostowany, a teraz jest - przesunięcie
-                if previous_fingers_status is not None:
-                    prev_index = previous_fingers_status[1]
-                    if not prev_index and index_extended:
-                        blocks.start_moving_current_block(pygame.K_LEFT)
-
-                    prev_pinky = previous_fingers_status[4]
-                    if not prev_pinky and pinky_extended:
+                direction = get_latest_direction()
+                if direction:
+                    if direction == "left":
+                         blocks.start_moving_current_block(pygame.K_LEFT)
+                    elif direction == "right":
                         blocks.start_moving_current_block(pygame.K_RIGHT)
+                    elif direction == "down":
+                        blocks.start_moving_current_block(pygame.K_DOWN)
+                    elif direction == "up":
+                        blocks.stop_moving_current_block()
 
-                    prev_thumb, prev_thumb_horiz = previous_fingers_status[0]
-                    # Drop: jeśli kciuk jest teraz wyprostowany i ułożony poziomo, a wcześniej nie był
-                    if not prev_thumb or not prev_thumb_horiz:
-                        if thumb_extended and thumb_horizontal:
-                            blocks.start_moving_current_block(pygame.K_DOWN)
-
-                    # Obrót - pojedyncze otwarcie dłoni (przejście z pięści do otwartej)
-                    # Pięść = wszystkie palce złożone: [False, False, False, False, False]
-                    # Otwarcie = np. wszystkie palce wyprostowane True
-                    closed_now = all(not s if isinstance(s, bool) else not s[0] for s in fingers_status)
-                    closed_prev = all(not s if isinstance(s, bool) else not s[0] for s in previous_fingers_status)
-
-                    if closed_prev and not closed_now:
-                        # Otwarcie dłoni
-                        blocks.rotate_current_block()
-
-                previous_fingers_status = fingers_status
+            if get_and_reset_rotation_triggered():
+                blocks.rotate_current_block()
+                
+            if get_and_reset_drop_triggered() and not paused and not game_over:
+                blocks.drop_current_block()
+                reset_direction()
 
         # Draw background and grid.
         screen.blit(background, (0, 0))
@@ -519,6 +513,7 @@ def main():
         # Update.
         pygame.display.flip()
 
+    release_camera()
     pygame.quit()
 
 
